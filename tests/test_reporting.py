@@ -33,10 +33,12 @@ class ReportingTest(unittest.TestCase):
             self.assertIn("Candidate-Focused Search Report", index_html)
             self.assertIn("omega_L3", index_html)
             self.assertIn("omega_L6_squared", index_html)
-            self.assertIn("Massive Search Funnel", index_html)
+            self.assertIn("Exploration-To-Verification Funnel", index_html)
+            self.assertIn("Frontier Spatial Diagnostics", index_html)
             self.assertIn("Survivor Queue Details", index_html)
             self.assertIn("Symbolic replay", index_html)
             self.assertIn("Target relevance", index_html)
+            self.assertIn("MathJax", index_html)
             self.assertIn("Raw Diagnostics", index_html)
             self.assertIn("<svg", index_html)
 

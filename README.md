@@ -144,9 +144,9 @@ localized_bump
 two_scale
 ```
 
-## AlphaFold-style Benchmark Framing
+## AlphaFold-Inspired Benchmark Framing
 
-이 프로젝트에서 "AlphaFold-style benchmark"는 생물학 모델을 의미하지 않는다. 의미는 다음과 같다.
+이 프로젝트에서 "AlphaFold-inspired benchmark"는 생물학 모델을 의미하지 않는다. 의미는 다음과 같다.
 
 ```text
 large candidate generation -> fixed benchmark set -> blind ranking -> staged verification
@@ -225,11 +225,33 @@ python3 scripts/build_index.py
 python3 scripts/report.py
 ```
 
+The report integrates mathematical-symbol notation for frontier inequalities and spatial field diagnostics for the most advanced promoted candidates.
+
 Run verification:
 
 ```bash
 python3 scripts/promote_good.py --data-dir data
 python3 scripts/run_verification.py --data-dir data
+```
+
+Render spatial field diagnostics for a promoted candidate:
+
+```bash
+python3 scripts/visualize_contour.py \
+  --queue-path data/promotions/verification_queue.json \
+  --candidate-index 0 \
+  --profile two_scale \
+  --grid-size 64
+```
+
+Render only the most advanced frontier candidates:
+
+```bash
+python3 scripts/visualize_contour.py \
+  --queue-path data/promotions/verification_queue.json \
+  --frontier \
+  --top 6 \
+  --dedupe
 ```
 
 Run tests:
@@ -269,5 +291,5 @@ data/        local-only generated artifacts
 2. duplicated proof path 제거
 3. holdout benchmark split 도입
 4. numeric stress family 확장
-5. promoted candidate의 paper-style lemma export
+5. promoted candidate의 formal lemma export
 6. 탐색 로그를 ML ranking dataset으로 변환

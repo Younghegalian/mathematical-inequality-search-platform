@@ -15,6 +15,10 @@ from typing import Any
 
 from engine.indexing import fetch_index_summaries
 from engine.promotion import promote_good_candidates
+from core.latex import candidate_inequality_latex, candidate_inequality_unicode
+from core.serde import expr_from_json
+from verifier.contour import compute_contour_fields, render_contour_figure, select_frontier_candidates, verification_progress
+from verifier.numeric import FieldSample, make_field, np
 
 
 STATUS_CLASS = {
@@ -193,6 +197,7 @@ def generate_reports(
             indexed_runs,
             scanned_runs,
             data_dir,
+            out_dir,
             generated_run_ids=selected_ids,
             promotion=promotion,
             exact_transition_scan=len(indexed_runs) <= scan_limit,
@@ -418,6 +423,7 @@ def render_indexed_index(
     indexed_runs: list[IndexedRun],
     scanned_runs: list[RunReport],
     data_dir: Path,
+    out_dir: Path,
     *,
     generated_run_ids: set[str],
     promotion: dict[str, Any],
@@ -474,7 +480,8 @@ def render_indexed_index(
     {scan_note}
     {card_grid(cards)}
     {panel("Project And Pipeline Guide", project_overview_panel(len(indexed_runs), len(case_counts), transition_total, promotion))}
-    {panel("Massive Search Funnel", massive_search_funnel_panel(indexed_runs, status_counts, closure_counts, case_counts, promotion, transition_total))}
+    {panel("Exploration-To-Verification Funnel", massive_search_funnel_panel(indexed_runs, status_counts, closure_counts, case_counts, promotion, transition_total))}
+    {panel("Frontier Spatial Diagnostics", frontier_contour_panel(promotion, out_dir))}
     {panel("Monte Carlo Frontier Map", monte_carlo_frontier_panel(indexed_runs, promotion))}
     {reading_guide_panel()}
     {panel("Survivor Queue Details", promotion_panel(promotion, generated_run_ids))}
@@ -553,7 +560,7 @@ def project_overview_panel(
         )
 
     steps = [
-        ("1", "Massive random samples", f"{format_count(run_count)} runs spread across target, depth, width, and search-seed settings."),
+        ("1", "Large-scale randomized sampling", f"{format_count(run_count)} runs spread across target, depth, width, and search-seed settings."),
         ("2", "Case coverage", f"After repeated settings are folded together, the run set covers {format_count(unique_cases)} case groups."),
         ("3", "Rule expansion", f"The search produced {format_count(transition_total)} rule transitions. This stage can be larger than the run count because each run branches."),
         ("4", "Closure classifier", "Candidate right-hand sides are quickly labeled GOOD, BAD, or UNKNOWN under the current closure model."),
@@ -578,7 +585,7 @@ def project_overview_panel(
     <section class="overview-stack">
       <div class="overview-lead">
         <p><strong>Short version:</strong> AISIS focuses on finding the critical inequalities that could make a Navier-Stokes regularity argument close.</p>
-        <p>The target template is <code>T(u) &lt;= epsilon * D(u) + C * L(u)</code>. If the nonlinear growth term can be absorbed into dissipation and the remainder is controlled by a lower-order energy, the PDE question can reduce to an ODE-style boundedness argument.</p>
+        <p>The target template is <code>T(u) &lt;= epsilon * D(u) + C * L(u)</code>. If the nonlinear growth term can be absorbed into dissipation and the remainder is controlled by a lower-order energy, the PDE question can reduce to an ODE-level boundedness criterion.</p>
       </div>
       <div class="overview-grid">{''.join(card_html)}</div>
       <div class="overview-steps">{''.join(step_html)}</div>
@@ -649,7 +656,7 @@ def reading_guide_panel() -> str:
         ),
         (
             "Where to look first",
-            "Read Massive Search Funnel first. It tells you where the frontier is and which verification gate is blocking the surviving candidates.",
+            "Read Exploration-To-Verification Funnel first. It tells you where the frontier is and which verification gate is blocking the surviving candidates.",
         ),
     ]
     items = []
@@ -854,7 +861,7 @@ def exploration_funnel_svg(
       </svg>
       <div class="interpretation-guard">
         <strong>Interpretation guard:</strong>
-        The right-edge survivor cluster is not a recommendation to search only there. The promoted examples currently fail target relevance because they are pure Sobolev-style norm embeddings, not nonlinear control inequalities. Treat that cluster as evidence of scoring/search bias until a candidate passes relevance and numeric stress.
+        The right-edge survivor cluster is not a recommendation to search only there. The promoted examples currently fail target relevance because they are pure Sobolev-type norm embeddings, not nonlinear control inequalities. Treat that cluster as evidence of scoring/search bias until a candidate passes relevance and numeric stress.
       </div>
       <p class="viz-note">Each particle is a real run from the data index. The plot is a low-dimensional projection, so distance in this panel is not mathematical distance between proof states. Small deterministic jitter only separates overlapping dots.</p>
     </div>
@@ -967,7 +974,7 @@ def monte_carlo_frontier_panel(runs: list[IndexedRun], promotion: dict[str, Any]
         (2.5, "unknown/near"),
         (4.0, "GOOD"),
         (6.0, "verified gates"),
-        (8.0, "deep frontier"),
+        (8.0, "advanced frontier"),
     ]
     legend_bits = []
     for index, (value, label) in enumerate(legend_items):
@@ -981,7 +988,7 @@ def monte_carlo_frontier_panel(runs: list[IndexedRun], promotion: dict[str, Any]
     return f"""
     <div class="mc-map-shell">
       <svg class="mc-map" viewBox="0 0 1080 410" role="img" aria-label="Monte Carlo frontier map">
-        <text class="viz-title" x="{plot_x}" y="20">Monte Carlo estimate of farthest local progress</text>
+        <text class="viz-title" x="{plot_x}" y="20">Monte Carlo estimate of maximal local pipeline depth</text>
         <rect x="{plot_x}" y="{plot_y}" width="{plot_w}" height="{plot_h}" rx="8" fill="#f7f9fc" stroke="#dfe4ec" />
         <g>{''.join(cells)}</g>
         <g>{''.join(ticks)}</g>
@@ -995,7 +1002,7 @@ def monte_carlo_frontier_panel(runs: list[IndexedRun], promotion: dict[str, Any]
       </svg>
       <div class="interpretation-guard">
         <strong>Interpretation guard:</strong>
-        This is a Monte Carlo smoothing of the existing dataset, not a proof landscape. It estimates where the current search process gets far, so it can reveal bias and under-sampled zones. A bright area means "the current engine advances there", not "the inequality is true there".
+        This is a Monte Carlo smoothing of the existing dataset, not a mathematical-validity landscape. It estimates where the current search process advances under the present scoring and verification pipeline, so it can reveal bias and under-sampled zones. A bright area means "the current engine advances there", not "the inequality is true there".
       </div>
       <p class="viz-note">Method: each heat cell is sampled by deterministic random probe points. Each probe estimates local progress from nearby runs and promoted candidates using distance weights in the projected target/search-budget plane.</p>
     </div>
@@ -1493,6 +1500,153 @@ def candidate_gate_progress(candidates: list[dict[str, Any]], *, limit: int = 4)
     return note + '<div class="candidate-progress-list">' + "".join(cards) + "</div>"
 
 
+def frontier_contour_panel(promotion: dict[str, Any], out_dir: Path, *, limit: int = 4) -> str:
+    candidates = [candidate for candidate in promotion.get("candidates", []) if isinstance(candidate, dict)]
+    frontier = select_frontier_candidates(candidates, limit=limit, dedupe=True)
+    if not frontier:
+        return '<p class="viz-note">No promoted frontier candidates are available for contour diagnostics yet.</p>'
+    if np is None:
+        return '<p class="viz-note">NumPy is unavailable, so contour diagnostics cannot be rendered in this environment.</p>'
+
+    contour_dir = out_dir / "contours"
+    contour_dir.mkdir(parents=True, exist_ok=True)
+    cards = []
+    failures = []
+    for rank, candidate in enumerate(frontier, start=1):
+        try:
+            rendered = render_frontier_candidate_contour(candidate, contour_dir, rank=rank)
+        except Exception as error:  # pragma: no cover - report should degrade instead of failing.
+            failures.append(f"{candidate.get('candidate_id', 'unknown')}: {error}")
+            continue
+        image_rel = Path("contours") / rendered["image_path"].name
+        metadata_rel = Path("contours") / rendered["metadata_path"].name
+        aggregates = rendered["aggregates"]
+        cards.append(
+            f"""
+            <article class="frontier-contour-card">
+              <div class="frontier-contour-head">
+                <span class="frontier-rank">#{rank}</span>
+                <div>
+                  <h3>{escape(str(candidate.get("target_name", "unknown")))}</h3>
+                  <p>progress {verification_progress(candidate)} · {escape(str(candidate.get("queue_status", "unknown")))} · score {escape(str(candidate.get("score", "")))}</p>
+                </div>
+              </div>
+              {candidate_math_block(candidate)}
+              {verification_reason_note(candidate)}
+              <img src="{escape(str(image_rel))}" alt="Spatial field diagnostic for frontier candidate {rank}">
+              <div class="frontier-metrics">
+                <span><strong>{aggregates["lhs_mean"]:.4g}</strong>LHS mean</span>
+                <span><strong>{aggregates["rhs_mean"]:.4g}</strong>RHS mean</span>
+                <span><strong>{aggregates["residual_max"]:.4g}</strong>max residual</span>
+                <span><strong>{aggregates["log_ratio_max"]:.4g}</strong>max log ratio</span>
+              </div>
+              <p class="viz-note">Metadata: <code>{escape(str(metadata_rel))}</code></p>
+            </article>
+            """
+        )
+
+    if not cards:
+        detail = "; ".join(failures[:3])
+        return f'<p class="viz-note">Frontier candidates were found, but contour rendering failed. {escape(detail)}</p>'
+
+    failure_note = ""
+    if failures:
+        failure_note = f'<p class="viz-note">{len(failures)} frontier contour(s) failed to render and were skipped.</p>'
+    note = (
+        '<p class="viz-note">Each panel is a spatial diagnostic evaluated on a synthetic periodic spectral field. It reports '
+        'omega, |grad omega|, localized LHS/RHS density proxies, residual, and log-ratio. Only the most advanced deduplicated '
+        'frontier candidates are rendered.</p>'
+    )
+    return note + failure_note + '<div class="frontier-contour-list">' + "".join(cards) + "</div>"
+
+
+def render_frontier_candidate_contour(candidate: dict[str, Any], contour_dir: Path, *, rank: int) -> dict[str, Any]:
+    lhs = expr_from_json(candidate["lhs"]["ast"])
+    rhs = expr_from_json(candidate["rhs"]["ast"])
+    grid_size = 64
+    profile = "two_scale"
+    frequency = 4
+    seed = rank - 1
+    amplitude = 1.0
+    fields = {
+        "omega": make_field(profile, amplitude, frequency, seed, grid_size, phase=0.0),
+        "u": make_field(profile, 0.7 * amplitude, max(1, frequency // 2), seed + 17, grid_size, phase=0.37),
+    }
+    sample = FieldSample(profile, amplitude, frequency, seed, fields)
+    contour_fields = compute_contour_fields(lhs, rhs, sample, constants={"eps": 1.0, "C": 1.0, "C_eps": 1.0})
+    stem = f"frontier_{rank:02d}_{safe_slug(str(candidate.get('target_name', 'candidate')))}_{str(candidate.get('candidate_id', ''))[:16]}"
+    image_path = contour_dir / f"{stem}.png"
+    metadata_path = contour_dir / f"{stem}.json"
+    subtitle = f"profile={profile}, amplitude=1, frequency={frequency}, seed={seed}, grid={grid_size}^3, slice=z:{grid_size // 2}"
+    render_contour_figure(
+        contour_fields,
+        output_path=image_path,
+        title=contour_title(candidate),
+        subtitle=subtitle,
+        axis="z",
+        index=None,
+        dpi=150,
+    )
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "candidate_id": candidate.get("candidate_id"),
+                "target_name": candidate.get("target_name"),
+                "queue_status": candidate.get("queue_status"),
+                "verification_progress": verification_progress(candidate),
+                "latex": candidate_latex(candidate),
+                "sample": sample.metadata(),
+                "aggregates": contour_fields.aggregates,
+                "image_path": str(image_path),
+            },
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return {"image_path": image_path, "metadata_path": metadata_path, "aggregates": contour_fields.aggregates}
+
+
+def candidate_math_block(candidate: dict[str, Any]) -> str:
+    latex = candidate_latex(candidate)
+    symbols = candidate_unicode(candidate)
+    if symbols:
+        latex_line = f'<div class="math-latex-source">{escape(latex)}</div>' if latex else ""
+        return f'<div class="candidate-math"><div class="math-symbols">{escape(symbols)}</div>{latex_line}</div>'
+    lhs = escape(str(candidate.get("lhs_text", "")))
+    rhs = escape(str(candidate.get("rhs_text", "")))
+    return f'<div class="candidate-math-fallback"><code>{lhs} &lt;= {rhs}</code></div>'
+
+
+def contour_title(candidate: dict[str, Any]) -> str:
+    latex = candidate_latex(candidate)
+    target = str(candidate.get("target_name", "candidate"))
+    if latex:
+        return f"{target}: ${latex}$"
+    return f"{target}: {candidate.get('lhs_text', '')} <= {candidate.get('rhs_text', '')}"
+
+
+def candidate_latex(candidate: dict[str, Any]) -> str:
+    try:
+        return candidate_inequality_latex(candidate)
+    except (KeyError, TypeError, ValueError):
+        return ""
+
+
+def candidate_unicode(candidate: dict[str, Any]) -> str:
+    try:
+        return candidate_inequality_unicode(candidate)
+    except (KeyError, TypeError, ValueError):
+        return ""
+
+
+def safe_slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("_")
+    return slug or "candidate"
+
+
 def verification_reason_note(candidate: dict[str, Any]) -> str:
     verification = candidate.get("verification", {})
     if not isinstance(verification, dict):
@@ -1899,6 +2053,13 @@ def page(title: str, body: str) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{escape(title)}</title>
   <style>{css()}</style>
+  <script>
+    window.MathJax = {{
+      tex: {{ displayMath: [['\\\\[', '\\\\]']], inlineMath: [['\\\\(', '\\\\)']] }},
+      options: {{ skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }}
+    }};
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 </head>
 <body>
   <main>
@@ -2332,6 +2493,95 @@ code { background: #eef1f5; border: 1px solid var(--line); border-radius: 4px; p
 }
 .candidate-note.failed { color: var(--bad); }
 .candidate-rhs { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.candidate-math {
+  border: 1px solid #d7e3ee;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  padding: 10px 12px;
+  margin: 10px 0 12px;
+  overflow-x: auto;
+}
+.math-symbols {
+  font-family: ui-serif, "Times New Roman", Times, serif;
+  font-size: 19px;
+  line-height: 1.35;
+  color: #172033;
+  white-space: nowrap;
+}
+.math-latex-source {
+  margin-top: 6px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.candidate-math-fallback {
+  margin: 10px 0 12px;
+  overflow-wrap: anywhere;
+}
+.frontier-contour-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  gap: 14px;
+}
+.frontier-contour-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 14px;
+}
+.frontier-contour-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.frontier-contour-head h3 {
+  margin: 0 0 2px;
+  font-size: 16px;
+}
+.frontier-contour-head p {
+  color: var(--muted);
+  margin: 0;
+  font-size: 12px;
+}
+.frontier-rank {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #172033;
+  font-weight: 850;
+}
+.frontier-contour-card img {
+  display: block;
+  width: 100%;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  background: #ffffff;
+}
+.frontier-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.frontier-metrics span {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--muted);
+  padding: 8px;
+  font-size: 11px;
+}
+.frontier-metrics strong {
+  color: var(--ink);
+  font-size: 15px;
+}
 table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
 th { color: var(--muted); font-size: 12px; background: #fbfcfe; position: sticky; top: 0; }
@@ -2341,7 +2591,8 @@ ol.counter-list li { margin: 6px 0; }
 @media (max-width: 760px) {
   main { padding: 18px; }
   .grid.two { grid-template-columns: 1fr; }
-  .process-flow, .guide-grid, .pipeline-flow, .candidate-progress-list, .candidate-list, .overview-grid, .overview-steps { grid-template-columns: 1fr; }
+  .process-flow, .guide-grid, .pipeline-flow, .candidate-progress-list, .candidate-list, .overview-grid, .overview-steps, .frontier-contour-list { grid-template-columns: 1fr; }
+  .frontier-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pipeline-step-card::after { display: none; }
   .process-step { min-height: auto; }
   .bar-row { grid-template-columns: 1fr; }
