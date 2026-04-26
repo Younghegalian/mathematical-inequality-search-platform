@@ -515,17 +515,26 @@ def project_overview_panel(
     candidates = list(promotion.get("candidates", []))
     promoted_count = int(promotion.get("candidate_count", 0))
     failed_relevance = sum(1 for item in candidates if str(item.get("queue_status", "")) == "failed_relevance")
-    passed_numeric = sum(1 for item in candidates if str(item.get("queue_status", "")) in {"passed_numeric", "verified", "accepted"})
+    post_numeric = sum(
+        1
+        for item in candidates
+        if str(item.get("queue_status", "")) in {"pending_human_review", "passed_numeric", "verified", "accepted"}
+    )
 
     if promoted_count == 0:
         verdict = "No candidates have reached the promotion queue yet. The useful next step is still broad exploration."
-    elif passed_numeric:
-        verdict = f"{format_count(passed_numeric)} candidate(s) have reached the post-numeric stage. Human mathematical review is now the bottleneck."
-    elif failed_relevance:
+    elif post_numeric:
+        verdict = f"{format_count(post_numeric)} candidate(s) have reached the post-numeric stage. Human mathematical review is now the bottleneck."
+    elif failed_relevance == promoted_count:
         verdict = (
             f"{format_count(promoted_count)} candidate(s) reached promotion, and {format_count(failed_relevance)} currently stop at target relevance. "
             "They look closure-friendly, but they are still pure norm embeddings rather than nonlinear-term control statements. "
             "A cluster near the right edge is therefore a bias warning, not a reason to search only there."
+        )
+    elif failed_relevance:
+        verdict = (
+            f"{format_count(promoted_count)} candidate(s) reached promotion; {format_count(failed_relevance)} stop at target relevance while other candidates continue downstream. "
+            "The current ranking treats nonlinear-term relevance as the primary promotion signal and closure as a secondary signal."
         )
     else:
         verdict = f"{format_count(promoted_count)} candidate(s) are in the promotion queue and moving through verification."
@@ -545,7 +554,7 @@ def project_overview_panel(
         ),
         (
             "What GOOD means",
-            "GOOD only means the current closure classifier likes the form. It is not a theorem candidate until replay, scaling, relevance, numeric stress, and human review pass.",
+            "GOOD only means the current closure classifier likes the form. Nonlinear-term relevance is ranked first; theorem candidates still need replay, scaling, relevance, numeric stress, and human review.",
         ),
     ]
     card_html = []
@@ -611,12 +620,12 @@ def process_overview_panel() -> str:
         (
             "3",
             "Score",
-            "Classify whether the right side closes as dissipation plus controlled lower order terms.",
+            "Rank nonlinear-term relevance first, then use closure as a secondary signal.",
         ),
         (
             "4",
             "Promote",
-            "Only GOOD or near-GOOD candidates stay visible; the rest becomes a density cloud.",
+            "Promote deduplicated nonlinear-term-relevant or closure-good candidates into the verification queue.",
         ),
         (
             "5",
@@ -648,7 +657,7 @@ def reading_guide_panel() -> str:
         ),
         (
             "What GOOD means",
-            "GOOD means the discovered right-hand side is closure-friendly under the current symbolic model. It is still only a candidate until replay, scaling, relevance, stress, and human checks pass.",
+            "GOOD means the discovered right-hand side is closure-friendly under the current symbolic model. It is useful, but nonlinear-term relevance is the stronger ranking signal.",
         ),
         (
             "What the dots mean",
@@ -700,7 +709,7 @@ def massive_search_funnel_panel(
     summary = (
         f'<p class="progress-summary"><strong>Frontier:</strong> {escape(frontier.rstrip(".") + ".")} '
         f'The search has produced {format_count(run_count)} sampled runs across {format_count(unique_cases)} case groups. '
-        f'{format_count(best_good)} runs reached GOOD, but dedupe collapses them to {format_count(promoted_count)} promoted candidate(s). '
+        f'{format_count(best_good)} runs reached GOOD, and relevance-first dedupe selects {format_count(promoted_count)} promoted candidate(s). '
         'The gate cards below show exactly where the survivors passed, failed, or stopped.</p>'
     )
 
@@ -715,7 +724,7 @@ def massive_search_funnel_panel(
         ),
         ("Closure classifier", best_good, f"GOOD · {format_count(best_unknown)} unknown · {format_count(best_bad)} bad", "done" if best_good else "watch"),
         ("Dedupe shortlist", promising_count, "unique promising forms", "done" if promising_count else "empty"),
-        ("Promotion queue", promoted_count, "exported GOOD candidates", "done" if promoted_count else "empty"),
+        ("Promotion queue", promoted_count, "exported relevant/closure candidates", "done" if promoted_count else "empty"),
         gate_row("Symbolic replay", "symbolic_replay", "proof path replay", progress_counts),
         gate_row("Scaling audit", "scaling_audit", "critical-dimension check", progress_counts),
         gate_row("Target relevance", "target_relevance_check", "nonlinear-term usefulness", progress_counts),
@@ -857,11 +866,13 @@ def exploration_funnel_svg(
           <text class="axis-label" x="232" y="4">BAD</text>
           <circle cx="294" cy="0" r="5" fill="none" stroke="{status_color("BAD")}" stroke-width="2" />
           <text class="axis-label" x="306" y="4">promoted but failed gate</text>
+          <circle cx="468" cy="0" r="5" fill="none" stroke="{status_color("GOOD")}" stroke-width="2" />
+          <text class="axis-label" x="480" y="4">promoted downstream</text>
         </g>
       </svg>
       <div class="interpretation-guard">
         <strong>Interpretation guard:</strong>
-        The right-edge survivor cluster is not a recommendation to search only there. The promoted examples currently fail target relevance because they are pure Sobolev-type norm embeddings, not nonlinear control inequalities. Treat that cluster as evidence of scoring/search bias until a candidate passes relevance and numeric stress.
+        This projection is a diagnostic view, not a mathematical coordinate system. The current ranking intentionally promotes nonlinear-term-relevant candidates ahead of closure-only norm embeddings; failed relevance markers flag pure embeddings, while downstream markers identify candidates that have passed the automated relevance and stress gates.
       </div>
       <p class="viz-note">Each particle is a real run from the data index. The plot is a low-dimensional projection, so distance in this panel is not mathematical distance between proof states. Small deterministic jitter only separates overlapping dots.</p>
     </div>
@@ -1286,7 +1297,7 @@ def search_progress_panel(
         {
             "label": "Promotion Queue",
             "count": promoted_count,
-            "note": "deduped GOOD candidates",
+            "note": "deduped relevant/closure candidates",
             "class": "done" if promoted_count else "empty",
         },
         {
@@ -1719,7 +1730,7 @@ def promotion_panel(promotion: dict[str, Any], generated_run_ids: set[str], limi
     jsonl_path = promotion.get("jsonl_path", "")
     if not candidates:
         return (
-            '<p class="viz-note">No GOOD candidates are waiting yet. When one appears, this panel will list it and '
+            '<p class="viz-note">No promoted candidates are waiting yet. When one appears, this panel will list it and '
             'the queue files will be refreshed automatically.</p>'
             f'<p class="viz-note">Queue target: <code>{escape(str(queue_path))}</code></p>'
         )

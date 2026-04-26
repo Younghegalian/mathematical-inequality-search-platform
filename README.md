@@ -89,13 +89,14 @@ flowchart LR
     A["Target generation"] --> B["Rule-chain sampling"]
     B --> C["Scaling filter"]
     C --> D["Early kill / complexity filter"]
-    D --> E["Closure scoring"]
+    D --> E["Relevance-first scoring"]
     E --> F["Promotion queue"]
     F --> G["Verification gates"]
     G --> H["Human theorem review packet"]
 ```
 
 대량 random search는 `target-policy`와 `rule-policy`를 통해 조합 공간을 샘플링한다.
+현재 ranking은 nonlinear-term relevance를 closure friendliness보다 높은 신호로 둔다. 즉, 순수 Sobolev embedding처럼 잘 닫히는 후보보다 Navier-Stokes nonlinear production proxy에서 출발했거나 Holder/Biot-Savart/Integral-to-Norm 경로를 실제로 거친 후보를 먼저 promotion queue에 올린다.
 
 ```bash
 python3 scripts/run_random.py \

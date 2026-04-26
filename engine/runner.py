@@ -59,7 +59,7 @@ class SearchRunner:
             rhs=state.rhs,
             steps=state.steps,
             closure=closure,
-            score=score_expr(state.rhs, closure),
+            score=score_expr(state.rhs, closure, target=target, lhs=state.lhs, steps=state.steps),
         )
 
     def run(self, target: TargetSpec) -> SearchResult:

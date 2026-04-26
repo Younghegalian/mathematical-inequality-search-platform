@@ -33,6 +33,25 @@ class PromotionTest(unittest.TestCase):
             self.assertEqual(queue["schema_version"], "aisis.verification_queue.v1")
             self.assertEqual(queue["candidates"][0]["queue_status"], "pending_symbolic")
 
+    def test_nonlinear_relevant_bad_candidate_is_promoted_first(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / "data"
+            out_dir = Path(temp_dir) / "promotions"
+            run_batch(
+                budget=2,
+                targets=["omega_L6_squared", "vortex_stretching"],
+                depths=[5],
+                widths=[50],
+                data_dir=data_dir,
+            )
+
+            result = promote_good_candidates(data_dir, out_dir=out_dir, limit=2)
+
+            targets = [candidate["target_name"] for candidate in result["candidates"]]
+            self.assertEqual(targets[0], "vortex_stretching")
+            self.assertIn("omega_L6_squared", targets)
+            self.assertEqual(result["candidates"][0]["promotion_reason"], "nonlinear_term_relevant")
+
 
 if __name__ == "__main__":
     unittest.main()

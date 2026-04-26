@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export GOOD AISIS candidates into a verification queue."""
+"""Export closure-good or nonlinear-term-relevant AISIS candidates."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from engine.promotion import promote_good_candidates
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Promote GOOD AISIS candidates")
+    parser = argparse.ArgumentParser(description="Promote verification-worthy AISIS candidates")
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
     parser.add_argument("--out", default=None)
     parser.add_argument("--limit", type=int, default=1000)

@@ -10,7 +10,7 @@ from engine.promotion import promote_good_candidates
 from core.expr import Derivative, Norm, Power
 from ns.variables import omega
 from verifier.numeric import stress_candidate
-from verifier.pipeline import run_verification_pipeline
+from verifier.pipeline import run_verification_pipeline, target_relevance_check
 
 
 class VerificationPipelineTest(unittest.TestCase):
@@ -56,6 +56,18 @@ class VerificationPipelineTest(unittest.TestCase):
         rhs = Power(Norm(Derivative(omega, 1), 2), 2)
 
         result = stress_candidate(lhs, rhs, grid_size=8)
+
+        self.assertTrue(result["passed"])
+
+    def test_target_relevance_accepts_generated_nonlinear_targets(self) -> None:
+        result = target_relevance_check(
+            {
+                "target_name": "velocity_strain_gradient",
+                "lhs_text": "int(u * D(u) * D(omega))",
+                "rhs_text": "C * ||D(omega)||_2^2",
+                "proof_rules": [],
+            }
+        )
 
         self.assertTrue(result["passed"])
 

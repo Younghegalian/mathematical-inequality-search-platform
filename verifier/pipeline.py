@@ -11,7 +11,9 @@ from typing import Any
 from core.closure import classify_closure
 from core.expr import Derivative, Norm, Power
 from core.scaling import scaling
+from core.scoring import NONLINEAR_PROMOTION_THRESHOLD, nonlinear_relevance_score
 from core.serde import expr_from_json, fraction_to_json
+from ns.generated import NONLINEAR_TARGETS
 from ns.variables import omega
 from verifier.numeric import stress_candidate
 from verifier.symbolic import replay_proof
@@ -155,32 +157,48 @@ def scaling_audit(candidate: dict[str, Any]) -> dict[str, Any]:
 def target_relevance_check(candidate: dict[str, Any]) -> dict[str, Any]:
     target_name = str(candidate.get("target_name", ""))
     lhs_text = str(candidate.get("lhs_text", ""))
+    rhs_text = str(candidate.get("rhs_text", ""))
     proof_rules = [str(rule) for rule in candidate.get("proof_rules", [])]
-    nonlinear_targets = {
-        "omega_L3",
-        "omega_cubic_integral",
-        "vortex_stretching",
-        "strain_vorticity",
-    }
-    nonlinear_rules = {"Holder", "Biot-Savart", "Integral-to-Norm"}
+    nonlinear_targets = {"omega_L3", "omega_cubic_integral", *NONLINEAR_TARGETS.keys()}
+    lhs = decode_candidate_expr(candidate, "lhs")
+    rhs = decode_candidate_expr(candidate, "rhs")
+    relevance = nonlinear_relevance_score(
+        lhs=lhs,
+        rhs=rhs,
+        target_name=target_name,
+        proof_rules=proof_rules,
+        lhs_text=lhs_text,
+        rhs_text=rhs_text,
+    )
 
-    if target_name in nonlinear_targets:
+    if relevance >= NONLINEAR_PROMOTION_THRESHOLD:
         return {
             "passed": True,
-            "reason": "target is one of the configured nonlinear/enstrophy-production proxies",
-            "details": {"target_name": target_name, "proof_rules": proof_rules},
-        }
-    if nonlinear_rules.intersection(proof_rules):
-        return {
-            "passed": True,
-            "reason": "proof path touches a nonlinear-product or Navier-Stokes control rule",
-            "details": {"target_name": target_name, "proof_rules": proof_rules},
+            "reason": "candidate is tied to a configured nonlinear-term or enstrophy-production proxy",
+            "details": {
+                "target_name": target_name,
+                "known_nonlinear_target": target_name in nonlinear_targets,
+                "nonlinear_relevance_score": relevance,
+                "proof_rules": proof_rules,
+            },
         }
 
     return failed(
         "candidate is closure-friendly but currently looks like a pure norm embedding, not a nonlinear-term control",
-        {"target_name": target_name, "lhs_text": lhs_text, "proof_rules": proof_rules},
+        {
+            "target_name": target_name,
+            "lhs_text": lhs_text,
+            "proof_rules": proof_rules,
+            "nonlinear_relevance_score": relevance,
+        },
     )
+
+
+def decode_candidate_expr(candidate: dict[str, Any], side: str):
+    try:
+        return expr_from_json(candidate[side]["ast"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def numeric_counterexample_search(candidate: dict[str, Any]) -> dict[str, Any]:
