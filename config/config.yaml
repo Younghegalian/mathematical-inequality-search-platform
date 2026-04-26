@@ -1,0 +1,13 @@
+search:
+  depth: 5
+  width: 50
+data:
+  save: true
+  root: data
+filters:
+  allowed_norms: [2, 3, 4, 5, 6]
+  max_complexity: 40
+  max_power: 8
+physics:
+  dimension: 3
+  domain: R3
