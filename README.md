@@ -1,150 +1,273 @@
 # Mathematical Inequality Search Platform
 
-Navier-Stokes 방정식의 비선형 항과 dissipation 사이에서 성립할 수 있는 핵심 부등식 구조를 자동으로 탐색하는 연구용 플랫폼입니다.
+![Python](https://img.shields.io/badge/python-3.11%2B-3776AB)
+![Tests](https://img.shields.io/badge/tests-unittest-brightgreen)
+![Domain](https://img.shields.io/badge/domain-Navier--Stokes%20inequalities-2F4858)
+![Status](https://img.shields.io/badge/status-research%20prototype-orange)
+![Artifacts](https://img.shields.io/badge/artifacts-JSONL%20%2B%20HTML-6C63FF)
 
-이 프로젝트는 PDE를 직접 수치적으로 푸는 코드가 아닙니다. 대신 다음 형태의 부등식 후보를 대량으로 생성하고, 필터링하고, 검증하고, 좋은 후보만 다음 단계로 올리는 proof-search 시스템입니다.
+Navier-Stokes 방정식의 비선형 항을 dissipation 항으로 흡수할 수 있는 부등식 구조를 자동 탐색하기 위한 연구용 플랫폼이다. 목표는 PDE를 직접 수치적으로 푸는 것이 아니라, 다음 형태의 후보 부등식과 증명 경로를 대량 생성하고 검증 가능한 후보만 선별하는 것이다.
 
 ```text
 T(u) <= epsilon * D(u) + C * L(u)
 ```
 
-예를 들어 vorticity omega에 대해 다음과 같은 구조를 찾는 것이 목표입니다.
+대표적인 목표 구조는 3차원 vorticity formulation에서 다음과 같은 critical inequality를 찾는 것이다.
 
 ```text
 integral |omega|^3 <= epsilon * ||grad omega||_2^2 + C * ||omega||_2^2
 ```
 
-이런 형태가 실제로 닫히면 에너지 부등식이 선형 Gronwall 형태로 떨어질 수 있고, global boundedness와 regularity 논의로 이어질 수 있습니다.
+이 저장소는 완성된 정리 증명기가 아니라, 불평등 조합 공간을 구조적으로 탐색하고 후보를 벤치마크하기 위한 실험 플랫폼이다.
 
-## 핵심 아이디어
+## Research Objective
 
-Navier-Stokes의 어려운 부분은 대략 다음 균형입니다.
-
-```text
-nonlinear growth  vs  viscous dissipation
-```
-
-플랫폼은 이 균형을 직접 증명하지 않고, 그 증명에 쓰일 수 있는 부등식 경로를 탐색합니다.
-
-탐색 과정은 다음 순서로 진행됩니다.
-
-1. target term 생성
-2. Holder, Sobolev, Gagliardo-Nirenberg, Young 등의 규칙 적용
-3. scaling consistency 검사
-4. 물리적으로 관련 없는 후보 제거
-5. closure 형태 판정
-6. symbolic / numeric verifier 통과 여부 확인
-7. 좋은 후보만 survivor queue와 report에 기록
-
-## 현재 구현 상태
-
-현재 버전은 연구 프로토타입입니다. 이미 다음 기능이 들어 있습니다.
-
-- 수식 AST와 canonical key
-- Navier-Stokes 변수와 target 생성기
-- Holder / Sobolev / GN / Young 계열 규칙
-- beam search와 random search
-- scaling filter
-- closure classifier
-- symbolic, scaling, relevance, numeric verifier
-- 대량 탐색 로그 저장 구조
-- HTML report 생성
-- 대량 랜덤 탐색에서 좋은 후보만 집중적으로 보여주는 report pipeline
-
-## 프로젝트 구조
+Navier-Stokes regularity 문제에서 핵심 병목은 nonlinear enstrophy production을 viscosity가 제공하는 dissipation으로 제어할 수 있는지이다.
 
 ```text
-core/        수식 표현, 규칙, 탐색, 필터, closure, scoring
-engine/      실행 상태, beam search, reporting
-ns/          Navier-Stokes 변수, target, physics proxy
-verifier/    symbolic / scaling / relevance / numeric 검증
-scripts/     실행 스크립트
-tests/       단위 테스트
-config/      기본 설정
-data/        로컬 탐색 결과 저장 위치
+nonlinear production <= absorbable dissipation + lower-order controlled term
 ```
 
-`data/` 아래의 대량 결과물은 GitHub에 올리지 않습니다. 몇만 개만 돌려도 파일이 커지기 때문에, 저장소에는 코드와 문서만 유지하고 실험 산출물은 로컬 또는 별도 artifact storage로 관리하는 방향입니다.
+플랫폼은 다음 질문을 계산 가능한 형태로 바꾼다.
 
-## 설치
+1. 어떤 target functional이 scaling-critical 구조를 갖는가?
+2. Holder, Sobolev, Gagliardo-Nirenberg, Young 조합으로 어떤 RHS가 생성되는가?
+3. 생성된 RHS가 dissipation term을 포함하고 lower-order norm으로 닫히는가?
+4. 그 후보가 단순 embedding인지, 실제 nonlinear Navier-Stokes 항과 관련된 후보인지 구분 가능한가?
+5. 자동화된 symbolic, scaling, numerical falsification gate를 통과하는 후보가 존재하는가?
 
-Python 3.11 이상을 권장합니다.
+## Mathematical Model
+
+현재 scaling convention은 다음을 기준으로 한다.
+
+```text
+u        -> +1
+omega    -> +2
+D^k f    -> scaling(f) + k
+||f||_p  -> scaling(f) - 3/p
+integral -> scaling(f) - 3
+```
+
+기본 dissipation과 controlled quantity는 다음과 같다.
+
+```text
+D(omega) = ||grad omega||_2^2
+L(omega) = ||omega||_2^2
+```
+
+closure 판정은 다음 ODE 형태를 기준으로 한다.
+
+```text
+GOOD: X'(t) <= C X(t)
+BAD:  X'(t) <= C X(t)^p, p > 1
+```
+
+## Inequality Combination Space
+
+현재 rule library는 다음 조합 공간을 생성한다.
+
+| Rule | Role |
+| --- | --- |
+| Integral-to-Norm | integral target을 Lp norm expression으로 변환 |
+| Holder | product integral을 norm product로 분해 |
+| Biot-Savart | velocity/strain proxy를 vorticity norm으로 연결 |
+| Sobolev | H1 dissipation에서 endpoint norm 제어 |
+| Gagliardo-Nirenberg | intermediate Lp norm을 L2와 H1 사이 interpolation |
+| Young | interpolation product를 epsilon-dissipation + controlled term으로 흡수 |
+
+탐색 대상은 크게 두 종류다.
+
+| Family | Examples | Purpose |
+| --- | --- | --- |
+| Critical norm targets | `omega_L3`, `omega_cubic_integral`, generated `omega_Lp_crit_q` | scaling-critical 후보 공간 점검 |
+| Nonlinear proxies | `vortex_stretching`, `strain_vorticity`, `velocity_strain_gradient`, `strain_strain_vorticity` | Navier-Stokes nonlinear production과의 관련성 점검 |
+
+## Search Pipeline
+
+```mermaid
+flowchart LR
+    A["Target generation"] --> B["Rule-chain sampling"]
+    B --> C["Scaling filter"]
+    C --> D["Early kill / complexity filter"]
+    D --> E["Closure scoring"]
+    E --> F["Promotion queue"]
+    F --> G["Verification gates"]
+    G --> H["Human theorem review packet"]
+```
+
+대량 random search는 `target-policy`와 `rule-policy`를 통해 조합 공간을 샘플링한다.
+
+```bash
+python3 scripts/run_random.py \
+  --budget 20000 \
+  --target-policy frontier \
+  --rule-policy sample
+```
+
+주요 sampling mode:
+
+| Option | Description |
+| --- | --- |
+| `--target-policy coverage` | target family coverage를 우선 |
+| `--target-policy family-balanced` | family별 균형 샘플링 |
+| `--target-policy frontier` | verification 실패 정보를 반영하여 frontier 쪽에 가중 |
+| `--rule-policy shuffle` | rule order를 무작위 섞음 |
+| `--rule-policy sample` | rule subset을 무작위 선택 |
+
+## Verification Protocol
+
+promotion queue에 올라간 후보는 다음 gate를 순서대로 통과해야 한다.
+
+| Gate | Implementation | Failure Meaning |
+| --- | --- | --- |
+| Symbolic replay | `verifier.symbolic.replay_proof` | 저장된 proof path가 현재 rule library로 재현되지 않음 |
+| Scaling audit | `verifier.pipeline.scaling_audit` | LHS/RHS scaling mismatch 또는 3D critical scaling 실패 |
+| Target relevance | `verifier.pipeline.target_relevance_check` | closure-friendly embedding일 뿐 nonlinear control 후보로 보기 어려움 |
+| Numeric counterexample search | `verifier.numeric.stress_candidate` | spectral/adversarial sample에서 구조적으로 불안정 |
+| Human math review | generated review packet | side condition, endpoint, constant dependence, domain assumption 수동 검토 필요 |
+
+검증 실행:
+
+```bash
+python3 scripts/promote_good.py --data-dir data
+python3 scripts/run_verification.py --data-dir data
+```
+
+numeric gate는 정리를 증명하지 않는다. 역할은 amplitude, frequency, profile, random Fourier family에서 ratio 폭주나 RHS degeneracy를 찾아 후보를 빠르게 반증하는 것이다.
+
+현재 stress family:
+
+```text
+single_mode
+multi_mode
+localized_bump
+two_scale
+```
+
+## AlphaFold-style Benchmark Framing
+
+이 프로젝트에서 "AlphaFold-style benchmark"는 생물학 모델을 의미하지 않는다. 의미는 다음과 같다.
+
+```text
+large candidate generation -> fixed benchmark set -> blind ranking -> staged verification
+```
+
+부등식 탐색에 맞춘 benchmark protocol은 다음과 같이 설계한다.
+
+| Benchmark Layer | Inequality Search Equivalent |
+| --- | --- |
+| Fixed target set | nonlinear proxy와 scaling-critical norm target의 고정 test suite |
+| Candidate ranking | closure score, scaling compatibility, proof length, rule diversity |
+| Blind validation | search에 사용하지 않은 target family와 random seed로 재검증 |
+| Structural falsification | spectral stress test와 family-growth ratio test |
+| Expert review | 자동 gate 통과 후보에 대한 수동 lemma reconstruction |
+
+권장 benchmark suite:
+
+| Suite | Targets | Primary Metric |
+| --- | --- | --- |
+| `critical-norm` | generated `omega_Lp_crit_q` | critical scaling pass rate |
+| `nonlinear-core` | vortex/strain/velocity nonlinear proxies | relevance pass rate |
+| `absorption` | Young absorption candidates | GOOD closure yield |
+| `stress-falsification` | promoted candidates | max ratio growth, failure family |
+| `holdout-targets` | search에 쓰지 않은 generated targets | generalization survival |
+
+핵심 성능 지표:
+
+```text
+deduplicated survivor yield
+GOOD closure rate
+symbolic replay pass rate
+critical scaling pass rate
+nonlinear relevance pass rate
+numeric stress pass rate
+top-k human-reviewable candidate count
+```
+
+## Data and Artifacts
+
+실험 결과는 GitHub에 포함하지 않는다. 대량 탐색 로그는 크기가 빠르게 증가하므로 `data/`는 `.gitignore` 처리되어 있다.
+
+| Artifact | Path |
+| --- | --- |
+| run events | `data/runs/*.jsonl` |
+| run summaries | `data/results/summary_*.json` |
+| promotion queue | `data/promotions/verification_queue.json` |
+| verification results | `data/verifications/*.json` |
+| review packets | `data/verifications/review_packets/*.md` |
+| HTML report | `data/reports/index.html` |
+| experiment bundle | `data/experiments/<id>/` |
+
+## Reproducible Commands
+
+Install:
 
 ```bash
 python3 -m pip install -r requirements.txt
 ```
 
-## 기본 실행
-
-사용 가능한 target을 확인합니다.
+List available targets:
 
 ```bash
 python3 scripts/run_search.py --list-targets --no-save
 ```
 
-작은 탐색을 실행합니다.
+Run a small search:
 
 ```bash
 python3 scripts/run_random.py --budget 1000 --target-policy frontier --rule-policy sample
 ```
 
-대량 탐색 예시는 다음과 같습니다.
-
-```bash
-python3 scripts/run_random.py --budget 20000 --target-policy frontier --rule-policy sample
-```
-
-## Report 생성
-
-탐색 결과를 인덱싱하고 HTML report를 생성합니다.
+Build report:
 
 ```bash
 python3 scripts/build_index.py
 python3 scripts/report.py
 ```
 
-생성된 report는 기본적으로 다음 위치에 만들어집니다.
-
-```text
-data/reports/index.html
-```
-
-실험별 report는 `data/experiments/.../reports/index.html` 아래에 생성될 수 있습니다.
-
-## Verification
-
-좋은 후보는 별도의 verifier pipeline으로 넘겨 symbolic, scaling, relevance, numeric 검사를 수행합니다.
+Run verification:
 
 ```bash
+python3 scripts/promote_good.py --data-dir data
 python3 scripts/run_verification.py --data-dir data
 ```
 
-검증 단계의 목적은 단순히 score가 높은 후보를 보여주는 것이 아니라, 실제 증명 후보로 이어질 수 있는 식만 다음 단계로 올리는 것입니다.
-
-## 테스트
+Run tests:
 
 ```bash
 python3 -m unittest
 ```
 
-## 연구 방향
-
-앞으로 중요한 확장 방향은 다음과 같습니다.
-
-- 중복 후보 제거 강화
-- target generation 다양화
-- scaling-critical family 집중 탐색
-- verifier의 수학적 엄밀성 강화
-- survivor candidate 기반 Monte Carlo local refinement
-- 탐색 로그를 ML 학습 데이터셋으로 변환
-- 좋은 후보가 나오면 proof assistant 또는 수동 증명 문서로 넘기는 후처리
-
-## 저장소 이름
-
-권장 GitHub 저장소 이름:
+## Repository Layout
 
 ```text
-mathematical-inequality-search-platform
+core/        expression AST, canonicalization, scaling, rules, search, filters
+engine/      runner, recording, indexing, promotion, reporting
+ns/          Navier-Stokes variables, target definitions, generated target families
+verifier/    symbolic replay, scaling audit, relevance gate, numerical stress tests
+scripts/     command-line entry points
+tests/       regression tests for search, reporting, promotion, verification
+config/      default search configuration
+data/        local-only generated artifacts
 ```
 
-약어 중심 이름 대신, 연구 플랫폼이라는 성격이 바로 드러나도록 전문적인 영어 이름을 사용합니다.
+## Limitations
+
+이 저장소의 자동 gate는 수학적 증명을 대체하지 않는다.
+
+- symbolic replay는 구현된 rule library 내부의 재현성만 확인한다.
+- scaling audit는 현재 AST scaling model에 대한 consistency check이다.
+- numeric stress test는 falsification 도구이며 proof가 아니다.
+- endpoint estimates, boundary condition, function space assumptions, constant dependence는 human review 단계에서 별도로 검토해야 한다.
+- Navier-Stokes regularity에 대한 claim은 자동 gate 통과만으로 성립하지 않는다.
+
+## Development Status
+
+현재 목표는 theorem prover가 아니라 benchmarkable inequality-search engine을 만드는 것이다. 단기 개발 우선순위는 다음과 같다.
+
+1. nonlinear target family 확장
+2. duplicated proof path 제거
+3. holdout benchmark split 도입
+4. numeric stress family 확장
+5. promoted candidate의 paper-style lemma export
+6. 탐색 로그를 ML ranking dataset으로 변환
